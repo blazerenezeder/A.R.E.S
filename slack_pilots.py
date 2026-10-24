@@ -34,6 +34,7 @@ import ares as _ares
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 BLAZE_SLACK_ID    = os.getenv("BLAZE_SLACK_ID", "U0B29SRFNBV")
 FLIGHT_DECK_NAME  = os.getenv("FLIGHT_DECK_CHANNEL", "flight-deck")
+ARES_PIPELINE_NAME = os.getenv("ARES_PIPELINE_CHANNEL", "ares-pipeline")
 STATE_FILE        = "/tmp/slack_pilots_state.json"
 HISTORY_FILE      = os.path.join(os.path.dirname(__file__), "slack_pilots_history.json")
 LOG_FILE          = os.path.join(os.path.dirname(__file__), "slack_pilots.log")
@@ -256,8 +257,18 @@ def run_bot(bot_name: str, bot_token: str, app_token: str):
     else:
         log.info(f"[{bot_name}] #{FLIGHT_DECK_NAME} not found (invite the bot to the channel)")
 
+    # Goose additionally watches #ares-pipeline as his A.R.E.S. control channel
+    ares_pipeline_id = None
+    if bot_name == "Goose":
+        ares_pipeline_id = _find_channel_id(web, ARES_PIPELINE_NAME)
+        if ares_pipeline_id:
+            log.info(f"[{bot_name}] #{ARES_PIPELINE_NAME}: {ares_pipeline_id} (control channel)")
+        else:
+            log.info(f"[{bot_name}] #{ARES_PIPELINE_NAME} not found (invite Goose to the channel)")
+
     last_ts_dm = str(time.time())
     last_ts_fd = str(time.time())
+    last_ts_ap = str(time.time())
 
     log.info(f"[{bot_name}] Polling every {POLL_INTERVAL}s...")
 
@@ -267,25 +278,32 @@ def run_bot(bot_name: str, bot_token: str, app_token: str):
     def handle_dm(msg):
         _process_message(web, bot_name, bot_token, dm_channel, msg, from_channel=False)
 
-    def handle_channel(msg):
-        text = (msg.get("text") or "")
-        is_direct = bool(mention_token and mention_token in text)
-        # Wing-wide triggers: Slack's @channel/@here render as <!channel>/<!here>.
-        # When user wants all 4 pilots to respond, those fire every bot.
-        is_wing = "<!channel>" in text or "<!here>" in text
-        if not (is_direct or is_wing):
-            return  # mention-only mode (no chatter response)
-        cleaned = mention_re.sub("", text)
-        cleaned = cleaned.replace("<!channel>", "").replace("<!here>", "").strip()
-        msg = dict(msg)
-        msg["text"] = cleaned
-        _process_message(web, bot_name, bot_token, flight_deck_id, msg, from_channel=True)
+    def _channel_mention_handler(reply_channel_id, is_control):
+        def h(msg):
+            text = (msg.get("text") or "")
+            is_direct = bool(mention_token and mention_token in text)
+            # Wing-wide triggers: Slack's @channel/@here render as <!channel>/<!here>.
+            is_wing = "<!channel>" in text or "<!here>" in text
+            if not (is_direct or is_wing):
+                return  # mention-only mode (no chatter response)
+            cleaned = mention_re.sub("", text)
+            cleaned = cleaned.replace("<!channel>", "").replace("<!here>", "").strip()
+            m = dict(msg)
+            m["text"] = cleaned
+            _process_message(web, bot_name, bot_token, reply_channel_id, m,
+                             from_channel=True, is_control_channel=is_control)
+        return h
+
+    handle_flight_deck = _channel_mention_handler(flight_deck_id, is_control=False) if flight_deck_id else None
+    handle_ares_pipeline = _channel_mention_handler(ares_pipeline_id, is_control=True) if ares_pipeline_id else None
 
     while True:
         try:
             last_ts_dm = _poll_channel(web, bot_name, dm_channel, last_ts_dm, handle_dm)
-            if flight_deck_id:
-                last_ts_fd = _poll_channel(web, bot_name, flight_deck_id, last_ts_fd, handle_channel)
+            if handle_flight_deck:
+                last_ts_fd = _poll_channel(web, bot_name, flight_deck_id, last_ts_fd, handle_flight_deck)
+            if handle_ares_pipeline:
+                last_ts_ap = _poll_channel(web, bot_name, ares_pipeline_id, last_ts_ap, handle_ares_pipeline)
         except Exception as e:
             log.error(f"[{bot_name}] Error: {e}")
             time.sleep(5)
@@ -299,8 +317,23 @@ CHANNEL_CONTEXT_HINT = (
     "Blaze will DM you directly. Keep replies brief.]\n\n"
 )
 
+ARES_PIPELINE_HINT = (
+    "[Context: replying in #ares-pipeline — your A.R.E.S. control channel. "
+    "Actions ARE allowed here: scans, job approvals (YES/NO/CL), pipeline "
+    "commands, application runs. Treat this like a DM for operational purposes. "
+    "Keep replies focused on A.R.E.S. work.\n"
+    "SLACK FORMATTING: Slack does NOT render markdown tables — pipes and dashes "
+    "show up as literal characters and look janky. Never use table syntax "
+    "(`|` `---`). For structured data, use numbered lists or bulleted lists. "
+    "Example: for a job list, write:\n"
+    "  1. Score 9 — Mission Operations Coordinator @ Nuro\n"
+    "  2. Score 9 — Operations & Supply Chain @ Waymo\n"
+    "Bold with *asterisks*, not **double** (Slack uses single asterisks). "
+    "Code and inline paths in `backticks`. Keep it scannable in a chat UI.]\n\n"
+)
 
-def _process_message(web, bot_name, bot_token, channel, msg, from_channel=False):
+
+def _process_message(web, bot_name, bot_token, channel, msg, from_channel=False, is_control_channel=False):
     text = (msg.get("text") or "").strip()
     files = msg.get("files") or []
 
@@ -353,10 +386,11 @@ def _process_message(web, bot_name, bot_token, channel, msg, from_channel=False)
 
     log.info(f"[{bot_name}] '{text[:80]}'")
 
-    # Goose intercepts job approval commands (with pilot-speak via _ares._normalize_command)
-    # BUT only in DMs — #flight-deck is conversation-only, never action-triggering.
+    # Goose intercepts job approval commands (with pilot-speak via _ares._normalize_command).
+    # Allowed from DMs OR from Goose's control channel (#ares-pipeline). #flight-deck stays conversation-only.
     canonical = _ares._normalize_command(text)
-    is_job_cmd = (not from_channel) and bot_name == "Goose" and canonical is not None
+    treat_as_control = (not from_channel) or is_control_channel
+    is_job_cmd = treat_as_control and bot_name == "Goose" and canonical is not None
     if is_job_cmd:
         pending = _ares.load_pending()
         changed, response = _ares.handle_command(text, pending)
@@ -364,7 +398,12 @@ def _process_message(web, bot_name, bot_token, channel, msg, from_channel=False)
             _ares.save_pending(pending)
         reply = response or "Goose is on it."
     else:
-        agent_input = (CHANNEL_CONTEXT_HINT + text) if from_channel else text
+        if is_control_channel:
+            agent_input = ARES_PIPELINE_HINT + text
+        elif from_channel:
+            agent_input = CHANNEL_CONTEXT_HINT + text
+        else:
+            agent_input = text
         reply = claude_reply(bot_name, agent_input)
 
     try:

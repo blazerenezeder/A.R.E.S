@@ -221,6 +221,7 @@ __marimo__/
 ares_pending.json
 ares_seen.json
 ares.log
+linkedin_match_cache.json
 *.bak
 *.bak_*
 
