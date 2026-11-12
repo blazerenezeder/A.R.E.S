@@ -233,3 +233,7 @@ slack_pilots.log
 security_scan.py
 muon_apply.py
 debug_form.py
+
+# LinkedIn connections export (PII)
+linkedin_connections.csv
+Connections.csv

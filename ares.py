@@ -1385,6 +1385,11 @@ def enrich_job(job: dict) -> dict:
         log.info(f"  Found hiring manager: {job['hiring_manager']}")
     if job["company_address"]:
         log.info(f"  Found address: {job['company_address'].split(chr(10))[0]}")
+    try:
+        import linkedin_match
+        job = linkedin_match.enrich_job(job)
+    except Exception as e:
+        log.warning(f"  LinkedIn lookup failed: {e}")
     return job
 
 # ── Cover letter generation ───────────────────────────────────────────────────
@@ -1450,6 +1455,9 @@ def send_telegram(body: str):
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if not token or not chat_id:
+            log.warning("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — message not sent")
+            return
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         chunks = [body[i:i+1500] for i in range(0, len(body), 1500)]
         for chunk in chunks:
@@ -1459,11 +1467,15 @@ def send_telegram(body: str):
     except Exception as e:
         log.error(f"Telegram failed: {e}")
 
-# Post to #ares-pipeline Slack channel using Maverick's bot token (which has channel post perms).
+# Optional mirror to a Slack channel. Off by default — A.R.E.S. is separate from
+# the personal pilot stack and talks to Blaze by text. Set ARES_ENABLE_SLACK=1
+# and ARES_SLACK_TOKEN to turn it on.
 def send_ares_channel(body: str, channel: str = "#ares-pipeline"):
+    if os.getenv("ARES_ENABLE_SLACK") != "1":
+        return
     try:
         from slack_sdk import WebClient
-        slack_token = os.getenv("SLACK_TOKEN_GRIZZ", "")
+        slack_token = os.getenv("ARES_SLACK_TOKEN", "")
         if not slack_token:
             return
         WebClient(token=slack_token).chat_postMessage(channel=channel, text=body)
@@ -1471,12 +1483,12 @@ def send_ares_channel(body: str, channel: str = "#ares-pipeline"):
     except Exception as e:
         log.warning(f"Slack {channel} send failed: {e}")
 
-# Notify Blaze about apply-flow progress via Slack #ares-pipeline.
-# Telegram disabled 2026-05-15. Set ARES_ENABLE_TELEGRAM=1 to also send via Telegram.
-def notify_apply(body: str):
-    if os.getenv("ARES_ENABLE_TELEGRAM") == "1":
-        send_telegram(body)
+# Every message to Blaze goes through here: Telegram text, plus Slack if enabled.
+def notify(body: str):
+    send_telegram(body)
     send_ares_channel(body)
+
+notify_apply = notify
 
 def download_telegram_file(file_id: str, suggested_name: str) -> str:
     """Download a Telegram file by file_id into INBOX_DIR. Returns local path or ''."""
@@ -1539,28 +1551,12 @@ def _daily_run_inner():
     filtered = [j for j in new_jobs if basic_filter(j)]
     log.info(f"{len(filtered)} passed basic filter")
     if not filtered:
-        _no_match_msg = f"A.R.E.S. // {datetime.now().strftime('%b %d')}\n\nNo new matching roles found today."
-        send_telegram(_no_match_msg)
-        try:
-            from slack_sdk import WebClient as _WC
-            _grizz_token = os.getenv("SLACK_TOKEN_GRIZZ", "")
-            if _grizz_token:
-                _WC(token=_grizz_token).chat_postMessage(channel="#ares-pipeline", text=_no_match_msg)
-        except Exception as _e:
-            log.warning(f"Slack post failed: {_e}")
+        notify(f"A.R.E.S. // {datetime.now().strftime('%b %d')}\n\nNo new matching roles found today.")
         return
     top_jobs = ai_score_jobs(filtered)
     log.info(f"{len(top_jobs)} passed AI scoring")
     if not top_jobs:
-        _no_match_msg = f"A.R.E.S. // {datetime.now().strftime('%b %d')}\n\nFound {len(filtered)} roles but none cleared the match threshold."
-        send_telegram(_no_match_msg)
-        try:
-            from slack_sdk import WebClient as _WC
-            _grizz_token = os.getenv("SLACK_TOKEN_GRIZZ", "")
-            if _grizz_token:
-                _WC(token=_grizz_token).chat_postMessage(channel="#ares-pipeline", text=_no_match_msg)
-        except Exception as _e:
-            log.warning(f"Slack post failed: {_e}")
+        notify(f"A.R.E.S. // {datetime.now().strftime('%b %d')}\n\nFound {len(filtered)} roles but none cleared the match threshold.")
         return
     pending = load_pending()
     new_pending = []
@@ -1577,6 +1573,9 @@ def _daily_run_inner():
             "reason": job.get("reason", ""),
             "hiring_manager": job.get("hiring_manager", ""),
             "company_address": job.get("company_address", ""),
+            "connections": job.get("connections", []),
+            "network_url": job.get("network_url", ""),
+            "warm_matches": job.get("warm_matches", []),
             "cover_letter": cover,
             "status": "pending",
             "found_at": datetime.now().isoformat()
@@ -1597,72 +1596,82 @@ def _daily_run_inner():
         msg += f"   Score: {job['score']}/10 — {job['reason']}\n"
         if date_flag:
             msg += f"   {date_flag}\n"
+        conns = job.get("connections") or []
+        if conns:
+            names = ", ".join(f"{c['name']} ({c['position']})" if c.get("position") else c["name"]
+                              for c in conns[:3])
+            more = f" +{len(conns) - 3} more" if len(conns) > 3 else ""
+            msg += f"   You know: {names}{more}\n"
+        warm = job.get("warm_matches") or []
+        if warm:
+            msg += f"   Shared background: {warm[0]['name']} ({warm[0]['angle']})\n"
+        if job.get("network_url"):
+            msg += f"   Your 2nd-degree there: {job['network_url']}\n"
         msg += f"   {job['link']}\n\n"
-    msg += "YES → apply next  |  NO → skip  |  CL → cover letter"
-    send_telegram(msg)
-    # Also post to Slack #ares-pipeline and #morning-brief
-    try:
-        from slack_sdk import WebClient as _WC
-        _grizz_token = os.getenv("SLACK_TOKEN_GRIZZ", "")
-        if _grizz_token:
-            _wc = _WC(token=_grizz_token)
-            _wc.chat_postMessage(channel="#ares-pipeline", text=msg)
-            _wc.chat_postMessage(channel="#morning-brief", text=msg)
-    except Exception as _e:
-        log.warning(f"Slack post failed: {_e}")
+    msg += "YES → apply next  |  NO → skip  |  CL → cover letter\nOr just text me like normal."
+    notify(msg)
     log.info(f"A.R.E.S. scan complete. {len(new_pending)} roles sent.")
 
 # ── Webhook server ────────────────────────────────────────────────────────────
 
 import threading
 
-def forward_to_openclaw(message: str) -> str:
-    """Forward a freeform Telegram message to OpenClaw's main agent (Maverick)."""
+# Freeform conversation with A.R.E.S. itself (Claude directly — no OpenClaw).
+# Recent turns are kept in memory so it can follow a back-and-forth; they reset
+# when the daemon restarts.
+CHAT_HISTORY_TURNS = 10
+_chat_history: list = []
+
+def _pipeline_summary(pending: list) -> str:
+    lines = []
+    for i, job in enumerate(pending, 1):
+        if job.get("status") not in ("pending", "approved"):
+            continue
+        conns = ", ".join(c["name"] for c in (job.get("connections") or [])[:3])
+        lines.append(
+            f"#{i} [{job.get('status')}] {job.get('title')} @ {job.get('company')} "
+            f"| score {job.get('score')}/10 | {job.get('location')}"
+            + (f" | knows: {conns}" if conns else "")
+        )
+    return "\n".join(lines[-15:]) or "(nothing pending)"
+
+def ares_chat(message: str, pending: list) -> str:
     message = (message or "").strip()
     if not message:
         return ""
+    system = (
+        f"You are A.R.E.S., {CANDIDATE_NAME}'s personal job-hunting agent. You talk to him "
+        "by text message, so reply like a sharp friend texting back: short, plain text, "
+        "no markdown, no tables.\n\n"
+        "What you do: every morning you scan job boards, score roles for fit, draft cover "
+        "letters, and flag people he knows at each company. He approves by texting "
+        "YES (apply to the next pending job), NO (skip it), CL (show its cover letter) "
+        "or 2CL (cover letter for job #2). You cannot take actions from chat yet — when "
+        "he wants one, tell him the exact command to text.\n\n"
+        f"His background:\n{CANDIDATE_PROFILE.strip()}\n\n"
+        f"Current pipeline:\n{_pipeline_summary(pending)}"
+    )
+    _chat_history.append({"role": "user", "content": message})
+    del _chat_history[:-CHAT_HISTORY_TURNS * 2]
     try:
-        result = subprocess.run(
-            ["openclaw", "agent", "--agent", "main",
-             "--message", message, "--json", "--timeout", "120"],
-            capture_output=True, text=True, timeout=150,
+        client = Anthropic(api_key=CLAUDE_API_KEY)
+        response = client.messages.create(
+            model="claude-haiku-5-5",
+            thinking={"type": "disabled"},
+            max_tokens=1000,
+            system=system,
+            messages=_chat_history,
         )
-    except subprocess.TimeoutExpired:
-        log.warning("openclaw agent timed out")
-        return "Maverick is taking too long to respond. Try again."
-    except FileNotFoundError:
-        log.warning("openclaw CLI not found on PATH")
-        return "Maverick unavailable: openclaw CLI not on PATH."
     except Exception as e:
-        log.warning(f"openclaw agent invocation failed: {e}")
-        return f"Maverick call failed: {e}"
-
-    stdout = result.stdout or ""
-    brace = stdout.find("{")
-    if brace < 0:
-        err_excerpt = (result.stderr or stdout).strip().splitlines()[0] if (result.stderr or stdout).strip() else ""
-        log.warning(f"openclaw agent: no JSON in output (exit {result.returncode}): "
-                    f"{(result.stderr or stdout)[:200]}")
-        return f"Maverick unreachable: {err_excerpt[:200]}" if err_excerpt else "Maverick unreachable (no output)."
-    try:
-        data = json.loads(stdout[brace:])
-    except json.JSONDecodeError as e:
-        log.warning(f"openclaw agent: JSON parse failed: {e}")
-        return "Maverick response unreadable."
-
-    # OpenClaw wraps the agent response in a "result" object now.
-    # Accept both shapes so this keeps working if the wrapper is removed.
-    container = data.get("result") if isinstance(data.get("result"), dict) else data
-    payloads = container.get("payloads") or []
-    if isinstance(payloads, list) and payloads and isinstance(payloads[0], dict):
-        text = payloads[0].get("text")
-        if isinstance(text, str) and text.strip():
-            return text.strip()
-    meta = container.get("meta") or {}
-    text = meta.get("finalAssistantVisibleText")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    return ""
+        _chat_history.pop()
+        log.warning(f"A.R.E.S. chat failed: {e}")
+        return f"A.R.E.S. chat is down right now ({e}). Commands still work: YES / NO / CL."
+    if response.stop_reason == "refusal":
+        _chat_history.pop()
+        return "I can't help with that one. Commands still work: YES / NO / CL."
+    reply = "".join(b.text for b in response.content if b.type == "text").strip()
+    _chat_history.append({"role": "assistant", "content": reply or "(no reply)"})
+    return reply
 
 
 # Pilot-speak: natural-language synonyms for YES/NO/CL. Match the user's vibe.
@@ -1754,11 +1763,11 @@ def handle_command(body, pending):
                 if is_ashby_job(job):
                     t = threading.Thread(target=ashby_apply, args=(job,), daemon=True)
                     t.start()
-                    response_text = f"Goose on it — opening Ashby form for {job['title']} at {job['company']}..."
+                    response_text = f"On it — opening Ashby form for {job['title']} at {job['company']}..."
                 elif is_greenhouse_job(job):
                     t = threading.Thread(target=greenhouse_apply, args=(job,), daemon=True)
                     t.start()
-                    response_text = f"Goose on it — opening Greenhouse form for {job['title']} @ {job['company']}..."
+                    response_text = f"On it — opening Greenhouse form for {job['title']} @ {job['company']}..."
                 else:
                     response_text = (
                         f"Manual apply — {job['title']} @ {job['company']}\n"
@@ -1794,6 +1803,10 @@ def handle_command(body, pending):
             response_text = "No pending jobs."
         return changed, response_text
 
+    if body in ("SCAN", "SCAN NOW", "RUN SCAN"):
+        threading.Thread(target=daily_run, daemon=True).start()
+        return changed, "Scanning now. I'll text you what I find."
+
     for i in range(1, 8):
         if body == f"{i}CL":
             idx = i - 1
@@ -1802,8 +1815,8 @@ def handle_command(body, pending):
                 response_text = f"Cover Letter — {job['title']} @ {job['company']}\n\n{job['cover_letter']}"
             break
     else:
-        # Not a recognized job command — forward to OpenClaw's main agent (Maverick)
-        response_text = forward_to_openclaw(original)
+        # Not a recognized job command — normal conversation with A.R.E.S.
+        response_text = ares_chat(original, pending)
 
     return changed, response_text
 
@@ -1866,16 +1879,23 @@ if __name__ == "__main__":
     import sys
     log.info("A.R.E.S. — Autonomous Role Extraction System — ONLINE")
     if len(sys.argv) > 1 and sys.argv[1] == "--daemon":
-        # Telegram polling disabled 2026-05-15 — Slack is the primary channel.
-        # Set ARES_ENABLE_TELEGRAM=1 to re-enable.
-        if os.getenv("ARES_ENABLE_TELEGRAM") == "1":
-            log.info("DAEMON MODE — Telegram polling ENABLED via env var.")
+        # Telegram is how A.R.E.S. talks to Blaze (2026-11-12). Set
+        # ARES_ENABLE_TELEGRAM=0 to turn listening off.
+        if os.getenv("ARES_ENABLE_TELEGRAM", "1") != "0":
+            log.info("DAEMON MODE — listening on Telegram.")
             t = threading.Thread(target=poll_telegram, daemon=True)
             t.start()
         else:
-            log.info("DAEMON MODE — Telegram polling DISABLED (Slack only). Idle loop.")
+            log.info("DAEMON MODE — Telegram listening OFF. Idle loop.")
+        # Optional built-in daily scan, e.g. ARES_SCAN_TIME=07:00. Leave unset if
+        # launchd (or cron) already runs `python3 ares.py` each morning.
+        scan_time = os.getenv("ARES_SCAN_TIME", "").strip()
+        if scan_time:
+            schedule.every().day.at(scan_time).do(daily_run)
+            log.info(f"Daily scan scheduled at {scan_time}")
         while True:
-            time.sleep(60)
+            schedule.run_pending()
+            time.sleep(30)
     else:
         log.info("Running scan...")
         daily_run()

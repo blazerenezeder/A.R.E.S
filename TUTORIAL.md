@@ -19,6 +19,15 @@ It is **not** a standalone app. It is one organ inside a larger personal AI OS
 called **OpenClaw**. Keep that in your head the whole time; most of the
 confusing parts of this codebase are the seams where A.R.E.S. meets OpenClaw.
 
+> **⚠️ Changed 2026-11-12 — A.R.E.S. is now separate from the pilots.**
+> A.R.E.S. talks to Blaze directly over **Telegram** (`notify()`, `poll_telegram`
+> in `--daemon` mode): daily briefs, YES/NO/CL/SCAN, and normal chat answered
+> by Claude directly (`ares_chat()`), with no OpenClaw involved. The four Slack pilots are
+> a personal stack with **no** A.R.E.S. duties; Goose no longer handles job
+> commands and `slack_pilots.py` no longer imports `ares.py`. Slack posting
+> from A.R.E.S. is off unless `ARES_ENABLE_SLACK=1`. Where sections below say
+> otherwise, this note wins. Direction of travel: [ROADMAP.md](ROADMAP.md).
+
 ---
 
 ## 2. The mental model (read this twice)
@@ -87,11 +96,10 @@ moment behavior changed, and root-cause from there. The most common real cause
 of A.R.E.S. breakage is an **OpenClaw update or a Control-UI change** upstream
 that breaks the pilot integration — not a bug in this repo. Look there early.
 
-**3.4 — Telegram is legacy but still in the code.**
-A.R.E.S. was born as a Telegram bot. That code still exists (`poll_telegram`,
-`send_telegram`, `download_telegram_file`) but is **off by default**. It only
-runs if `ARES_ENABLE_TELEGRAM=1`. Slack is the primary and only live surface.
-Don't delete the Telegram paths casually, but don't assume they're active either.
+**3.4 — Telegram is the live surface again (since 2026-11-12).**
+A.R.E.S. was born as a Telegram bot, moved to Slack, and came back to Telegram
+when it split from the pilots. `--daemon` listens on Telegram unless
+`ARES_ENABLE_TELEGRAM=0`.
 
 **3.5 — Runtime/state files are NOT in git, and some contain PII.**
 `ares_pending.json`, `ares_seen.json`, `ares.log`, `slack_pilots_history.json`,

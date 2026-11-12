@@ -15,6 +15,7 @@ angles first (rare school + rare cred combos beat generic hobby matches).
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
@@ -227,22 +228,104 @@ def find_matches_for_company(company: str, max_matches: int = 3) -> list[dict]:
     return ranked[:max_matches]
 
 
+# ── Blaze's real network (LinkedIn data export) ──────────────────────────────
+# LinkedIn has no API for reading your connections, but it lets you download
+# them: Settings → Data privacy → Get a copy of your data → Connections.
+# Drop the Connections.csv here (gitignored — it's PII).
+
+CONNECTIONS_CSV = os.getenv(
+    "LINKEDIN_CONNECTIONS_CSV",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkedin_connections.csv"),
+)
+
+_COMPANY_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "the", "pbc"}
+_connections_cache: Optional[list[dict]] = None
+
+
+def _norm_company(name: str) -> str:
+    words = re.sub(r"[^a-z0-9 ]", " ", (name or "").lower()).split()
+    return " ".join(w for w in words if w not in _COMPANY_SUFFIXES)
+
+
+def load_connections(path: str = CONNECTIONS_CSV) -> list[dict]:
+    """Read LinkedIn's Connections.csv. It starts with a few 'Notes:' lines
+    before the real header row, so skip to the line that begins 'First Name'."""
+    global _connections_cache
+    if _connections_cache is not None:
+        return _connections_cache
+    rows: list[dict] = []
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            lines = f.readlines()
+        start = next((i for i, l in enumerate(lines) if l.startswith("First Name")), None)
+        if start is None:
+            log.warning(f"{path}: no 'First Name' header row found")
+        else:
+            for r in csv.DictReader(lines[start:]):
+                name = f"{r.get('First Name', '')} {r.get('Last Name', '')}".strip()
+                if not name:
+                    continue
+                rows.append({
+                    "name": name,
+                    "company": (r.get("Company") or "").strip(),
+                    "position": (r.get("Position") or "").strip(),
+                    "linkedin": (r.get("URL") or "").strip(),
+                })
+            log.info(f"loaded {len(rows)} LinkedIn connections")
+    except FileNotFoundError:
+        log.info(f"no LinkedIn connections export at {path} — skipping 1st-degree check")
+    _connections_cache = rows
+    return rows
+
+
+def find_connections_at(company: str) -> list[dict]:
+    """1st-degree connections whose current company matches. Matches exact
+    names after dropping Inc/LLC/etc, plus 'Figure' ↔ 'Figure AI' style prefixes."""
+    target = _norm_company(company)
+    if len(target) < 3:
+        return []
+    hits = []
+    for c in load_connections():
+        theirs = _norm_company(c["company"])
+        if not theirs:
+            continue
+        if theirs == target or theirs.startswith(target + " ") or target.startswith(theirs + " "):
+            hits.append(c)
+    return hits
+
+
+def network_search_url(company: str, degree: str = "S") -> str:
+    """LinkedIn people search for the company, limited to your network.
+    degree "S" = 2nd-degree (LinkedIn shows the mutual connection on each
+    result), "F" = 1st-degree. Opened by Blaze himself — no scraping."""
+    return (
+        "https://www.linkedin.com/search/results/people/"
+        f"?keywords={quote_plus(company)}&network=%5B%22{degree}%22%5D"
+    )
+
+
 def enrich_job(job: dict, min_score_for_lookup: int = 8) -> dict:
     """
-    Called from ares.py after AI scoring. Attaches `warm_matches` to the job
-    when its score meets threshold. No-op for lower-score jobs to conserve
-    search budget.
+    Called from ares.py after AI scoring. Always attaches Blaze's real
+    1st-degree `connections` at the company and a `network_url` for his
+    2nd-degree network. Attaches `warm_matches` (strangers with a shared
+    background) only when the score meets threshold, to conserve search budget.
     """
+    company = (job.get("company") or "").strip()
+    if not company:
+        return job
+
+    job["connections"] = find_connections_at(company)
+    job["network_url"] = network_search_url(company)
+    if job["connections"]:
+        log.info(f"[{company}] {len(job['connections'])} 1st-degree connection(s)")
+
     try:
         score = int(job.get("score", 0))
     except (TypeError, ValueError):
         score = 0
 
     if score < min_score_for_lookup:
-        return job
-
-    company = (job.get("company") or "").strip()
-    if not company:
         return job
 
     try:
@@ -260,6 +343,10 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
     import sys
     company = " ".join(sys.argv[1:]) or "Waymo"
+    print(f"1st-degree connections at {company}:")
+    for c in find_connections_at(company):
+        print(f"  {c['name']} — {c['position']} @ {c['company']}")
+    print(f"2nd-degree search: {network_search_url(company)}")
     print(f"looking up warm matches at: {company}")
     for m in find_matches_for_company(company):
         print(f"  [{m['weight']}] {m['name']} — {m['angle']}")
