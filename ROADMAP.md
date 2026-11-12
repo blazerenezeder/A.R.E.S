@@ -8,6 +8,9 @@ Get applications out. A.R.E.S. works on its own, separate from the personal
 pilot stack.
 
 ## Decisions
+- **2026-11-12:** Texting goes through **Twilio** (a real phone number texting
+  Blaze's phone). No Telegram. Twilio needs US carrier registration (A2P 10DLC)
+  first, which takes days to a couple of weeks.
 - **2026-11-12:** A.R.E.S. is its own system. The personal Slack pilots
   (Maverick, Goose, Bob, Rooster) are a personal fun stack and have **no**
   A.R.E.S. duties. Goose keeps his identity but no responsibilities for now.
@@ -19,7 +22,10 @@ pilot stack.
 
 ## Now (today)
 - [x] Add requirements.txt and move to Claude 5.5 models
-- [x] A.R.E.S. texts Blaze directly (Telegram) for briefs, approvals and chat
+- [x] A.R.E.S. texts Blaze directly for briefs, approvals and chat (built on
+      Telegram; switching to Twilio SMS)
+- [ ] Twilio: create account, buy number, submit A2P 10DLC registration
+- [ ] Swap Telegram code for Twilio SMS (send + receive replies)
 - [x] Normal-chat conversation with A.R.E.S. (Claude directly, not OpenClaw)
 - [x] Text SCAN to run a scan on demand
 - [x] Goose takes no A.R.E.S. commands in Slack
@@ -35,7 +41,6 @@ pilot stack.
       top covers it for now)
 
 ## Next
-- [ ] Real SMS through Twilio (needs US A2P 10DLC registration, which takes days)
 - [ ] Web dashboard you can log into from anywhere (phone home screen too):
       pending jobs, Approve / Skip / Edit cover letter, and a chat panel
 - [ ] Move A.R.E.S. to a fresh repo built as a product, not a personal script
