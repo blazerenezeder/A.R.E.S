@@ -22,7 +22,7 @@ Every morning at 7am:
 - Scrapes **Greenhouse, Lever, Ashby, and target company career pages** for new roles
 - Also pulls from **Indeed** (HTML + RSS) as a supplement
 - Filters by Bay Area geo, salary floor, and an exclusion keyword list
-- Scores each role 1–10 with Claude Sonnet 4.6 via OpenClaw — combining fit and realistic odds of getting past the ATS
+- Scores each role 1–10 with Claude Haiku 5.5 — combining fit and realistic odds of getting past the ATS
 - Enriches high-scoring leads with hiring manager contact info via **Hunter.io**
 - Looks up company registered addresses via the **California Secretary of State**
 - Generates a tailored cover letter in my voice, per role
@@ -42,7 +42,7 @@ Live control:
 ## Tech Stack
 
 - Python 3 (no framework — long-running daemon + Playwright + requests)
-- Anthropic Claude (via OpenClaw's gateway; Claude Sonnet 4.6 for scoring, Claude Haiku 4.5 for lighter tasks)
+- Anthropic Claude (via OpenClaw's gateway; Claude Haiku 5.5 for scoring, cover letters and form answers)
 - Slack Socket Mode (`slack_sdk`) for the four pilot bots
 - Playwright for browser automation (Greenhouse + Ashby form auto-fill)
 - BeautifulSoup + requests for scraping

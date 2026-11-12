@@ -1,0 +1,9 @@
+anthropic
+beautifulsoup4
+fpdf2
+playwright
+python-dotenv
+requests
+schedule
+slack_sdk
+twilio

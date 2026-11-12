@@ -4,7 +4,7 @@ slack_pilots.py — Four-pilot Slack bot backend for OpenClaw workspace.
 Uses Socket Mode for real-time DM responses (no polling delay).
 
 Maverick / Goose / Bob / Rooster each listen for DMs from Blaze
-and respond in character using Claude claude-sonnet-4-6.
+and respond in character using Claude claude-sonnet-5-5.
 """
 
 import os
@@ -38,7 +38,7 @@ ARES_PIPELINE_NAME = os.getenv("ARES_PIPELINE_CHANNEL", "ares-pipeline")
 STATE_FILE        = "/tmp/slack_pilots_state.json"
 HISTORY_FILE      = os.path.join(os.path.dirname(__file__), "slack_pilots_history.json")
 LOG_FILE          = os.path.join(os.path.dirname(__file__), "slack_pilots.log")
-MODEL             = "claude-sonnet-4-6"
+MODEL             = "claude-sonnet-5-5"
 HISTORY_LIMIT     = 20  # pairs kept per pilot
 
 log = logging.getLogger("slack_pilots")
