@@ -1483,10 +1483,12 @@ def send_ares_channel(body: str, channel: str = "#ares-pipeline"):
     except Exception as e:
         log.warning(f"Slack {channel} send failed: {e}")
 
-# Every message to Blaze goes through here: iMessage (until Twilio is
-# approved), Telegram if configured, plus Slack if enabled.
+# Every message to Blaze goes through here: Twilio SMS, iMessage if
+# ARES_IMESSAGE_TO is set, Telegram if configured, plus Slack if enabled.
 def notify(body: str):
-    import imessage
+    import twilio_sms, imessage
+    if twilio_sms.enabled():
+        twilio_sms.send(body)
     if imessage.enabled():
         imessage.send(body)
     if os.getenv("TELEGRAM_BOT_TOKEN"):
@@ -1894,10 +1896,13 @@ if __name__ == "__main__":
     import sys
     log.info("A.R.E.S. — Autonomous Role Extraction System — ONLINE")
     if len(sys.argv) > 1 and sys.argv[1] == "--daemon":
-        # A.R.E.S. listens for Blaze's texts over iMessage (ARES_IMESSAGE_TO)
-        # until Twilio SMS is approved. Telegram still works if a bot token is set.
-        import imessage
+        # A.R.E.S. listens for Blaze's texts over Twilio SMS. iMessage
+        # (ARES_IMESSAGE_TO) and Telegram (bot token) work too if configured.
+        import twilio_sms, imessage
         listening = []
+        if twilio_sms.enabled():
+            threading.Thread(target=twilio_sms.poll, args=(handle_text,), daemon=True).start()
+            listening.append("Twilio SMS")
         if imessage.enabled():
             threading.Thread(target=imessage.poll, args=(handle_text,), daemon=True).start()
             listening.append("iMessage")

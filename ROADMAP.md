@@ -8,8 +8,9 @@ Get applications out. A.R.E.S. works on its own, separate from the personal
 pilot stack.
 
 ## Decisions
-- **2026-11-12:** Until Twilio is approved, A.R.E.S. texts over **iMessage**
-  from the always-on Mac (free, works today). Switch to Twilio once approved.
+- **2026-11-12:** Skipped the iMessage bridge (it needed a second Apple ID).
+  The old Slack A.R.E.S. keeps running until Twilio is approved; then deploy.
+  `imessage.py` stays in the repo as an option.
 - **2026-11-12:** Texting goes through **Twilio** (a real phone number texting
   Blaze's phone). No Telegram. Twilio needs US carrier registration (A2P 10DLC)
   first, which takes days to a couple of weeks.
@@ -18,7 +19,7 @@ pilot stack.
   A.R.E.S. duties. Goose keeps his identity but no responsibilities for now.
 - **2026-11-12:** No Slack or Discord for A.R.E.S. A future employer's Slack
   can't be used, and Discord banned the account. A.R.E.S. talks to Blaze by
-  text (iMessage now, Twilio SMS later) and later through its own dashboard.
+  text (Twilio SMS) and later through its own dashboard.
 - **2026-11-12:** Workflow: code on the MacBook, push to GitHub, and the
   always-on Mac pulls and runs it.
 
@@ -26,11 +27,10 @@ pilot stack.
 - [x] Add requirements.txt and move to Claude 5.5 models
 - [x] A.R.E.S. texts Blaze directly for briefs, approvals and chat (built on
       Telegram; switching to Twilio SMS)
-- [x] iMessage bridge so texting works today (`imessage.py`)
-- [ ] iMessage setup on the always-on Mac: separate Apple ID in Messages,
-      Full Disk Access for python3, `python3 imessage.py test`
+- [x] Twilio SMS code: send + receive replies (`twilio_sms.py`)
 - [ ] Twilio: create account, buy number, submit A2P 10DLC registration
-- [ ] Swap Telegram code for Twilio SMS (send + receive replies)
+- [ ] When approved: Twilio keys in .env on the always-on Mac,
+      `python3 twilio_sms.py test`, restart A.R.E.S.
 - [x] Normal-chat conversation with A.R.E.S. (Claude directly, not OpenClaw)
 - [x] Text SCAN to run a scan on demand
 - [x] Goose takes no A.R.E.S. commands in Slack

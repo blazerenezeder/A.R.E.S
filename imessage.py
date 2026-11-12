@@ -52,7 +52,7 @@ end run
 
 
 def recipient() -> str:
-    return (os.getenv("ARES_IMESSAGE_TO") or os.getenv("MY_PHONE") or "").strip()
+    return os.getenv("ARES_IMESSAGE_TO", "").strip()
 
 
 def enabled() -> bool:
