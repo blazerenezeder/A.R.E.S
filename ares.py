@@ -728,6 +728,7 @@ Question: {question}"""
         client = Anthropic(api_key=CLAUDE_API_KEY)
         response = client.messages.create(
             model="claude-haiku-5-5",
+            thinking={"type": "disabled"},  # Haiku 5.5 thinks by default; keep replies a single text block
             max_tokens=180,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1256,6 +1257,7 @@ Question: {question}"""
         client = Anthropic(api_key=CLAUDE_API_KEY)
         response = client.messages.create(
             model="claude-haiku-5-5",
+            thinking={"type": "disabled"},  # Haiku 5.5 thinks by default; keep replies a single text block
             max_tokens=150,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1349,6 +1351,7 @@ Jobs:
     try:
         response = client.messages.create(
             model="claude-haiku-5-5",
+            thinking={"type": "disabled"},  # Haiku 5.5 thinks by default; keep replies a single text block
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -1432,6 +1435,7 @@ Length: 450 to 550 words. No dashes. No bullet points. No invented details. Ever
     try:
         response = client.messages.create(
             model="claude-haiku-5-5",
+            thinking={"type": "disabled"},  # Haiku 5.5 thinks by default; keep replies a single text block
             max_tokens=900,
             messages=[{"role": "user", "content": prompt}]
         )
