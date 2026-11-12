@@ -20,8 +20,8 @@ called **OpenClaw**. Keep that in your head the whole time; most of the
 confusing parts of this codebase are the seams where A.R.E.S. meets OpenClaw.
 
 > **⚠️ Changed 2026-11-12 — A.R.E.S. is now separate from the pilots.**
-> A.R.E.S. talks to Blaze directly over **Telegram** (`notify()`, `poll_telegram`
-> in `--daemon` mode): daily briefs, YES/NO/CL/SCAN, and normal chat answered
+> A.R.E.S. talks to Blaze directly by **iMessage** (`imessage.py`; `notify()`
+> sends, `imessage.poll` listens in `--daemon` mode) until Twilio SMS is approved: daily briefs, YES/NO/CL/SCAN, and normal chat answered
 > by Claude directly (`ares_chat()`), with no OpenClaw involved. The four Slack pilots are
 > a personal stack with **no** A.R.E.S. duties; Goose no longer handles job
 > commands and `slack_pilots.py` no longer imports `ares.py`. Slack posting
@@ -96,10 +96,11 @@ moment behavior changed, and root-cause from there. The most common real cause
 of A.R.E.S. breakage is an **OpenClaw update or a Control-UI change** upstream
 that breaks the pilot integration — not a bug in this repo. Look there early.
 
-**3.4 — Telegram is the live surface again (since 2026-11-12).**
-A.R.E.S. was born as a Telegram bot, moved to Slack, and came back to Telegram
-when it split from the pilots. `--daemon` listens on Telegram unless
-`ARES_ENABLE_TELEGRAM=0`.
+**3.4 — iMessage is the live surface (since 2026-11-12).**
+A.R.E.S. was born as a Telegram bot, moved to Slack, and now texts Blaze over
+iMessage from the always-on Mac (`ARES_IMESSAGE_TO`) until Twilio SMS is
+approved. Telegram code remains and only runs if `TELEGRAM_BOT_TOKEN` is set.
+Reading replies needs Full Disk Access for python3 (it reads `chat.db`).
 
 **3.5 — Runtime/state files are NOT in git, and some contain PII.**
 `ares_pending.json`, `ares_seen.json`, `ares.log`, `slack_pilots_history.json`,

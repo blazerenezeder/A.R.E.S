@@ -1483,9 +1483,14 @@ def send_ares_channel(body: str, channel: str = "#ares-pipeline"):
     except Exception as e:
         log.warning(f"Slack {channel} send failed: {e}")
 
-# Every message to Blaze goes through here: Telegram text, plus Slack if enabled.
+# Every message to Blaze goes through here: iMessage (until Twilio is
+# approved), Telegram if configured, plus Slack if enabled.
 def notify(body: str):
-    send_telegram(body)
+    import imessage
+    if imessage.enabled():
+        imessage.send(body)
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        send_telegram(body)
     send_ares_channel(body)
 
 notify_apply = notify
@@ -1820,6 +1825,16 @@ def handle_command(body, pending):
 
     return changed, response_text
 
+def handle_text(text: str):
+    """One incoming text from Blaze (any channel): run it, text back the reply."""
+    log.info(f"Text from Blaze: {text}")
+    pending = load_pending()
+    changed, response = handle_command(text, pending)
+    if changed:
+        save_pending(pending)
+    if response:
+        notify(response)
+
 def poll_telegram():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -1879,14 +1894,17 @@ if __name__ == "__main__":
     import sys
     log.info("A.R.E.S. — Autonomous Role Extraction System — ONLINE")
     if len(sys.argv) > 1 and sys.argv[1] == "--daemon":
-        # Telegram is how A.R.E.S. talks to Blaze (2026-11-12). Set
-        # ARES_ENABLE_TELEGRAM=0 to turn listening off.
-        if os.getenv("ARES_ENABLE_TELEGRAM", "1") != "0":
-            log.info("DAEMON MODE — listening on Telegram.")
-            t = threading.Thread(target=poll_telegram, daemon=True)
-            t.start()
-        else:
-            log.info("DAEMON MODE — Telegram listening OFF. Idle loop.")
+        # A.R.E.S. listens for Blaze's texts over iMessage (ARES_IMESSAGE_TO)
+        # until Twilio SMS is approved. Telegram still works if a bot token is set.
+        import imessage
+        listening = []
+        if imessage.enabled():
+            threading.Thread(target=imessage.poll, args=(handle_text,), daemon=True).start()
+            listening.append("iMessage")
+        if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("ARES_ENABLE_TELEGRAM", "1") != "0":
+            threading.Thread(target=poll_telegram, daemon=True).start()
+            listening.append("Telegram")
+        log.info(f"DAEMON MODE — listening on {', '.join(listening) or 'nothing (idle loop)'}.")
         # Optional built-in daily scan, e.g. ARES_SCAN_TIME=07:00. Leave unset if
         # launchd (or cron) already runs `python3 ares.py` each morning.
         scan_time = os.getenv("ARES_SCAN_TIME", "").strip()
